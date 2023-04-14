@@ -1,11 +1,9 @@
 import argparse
-import utils
-import sqlite3
-import sys
 import subprocess
+import sys
 import psutil
-from tzlocal import get_localzone
 from dateutil.parser import parse
+import utils
 
 # init database
 conn, c = utils.get_conn()
@@ -19,6 +17,7 @@ if len(tables) != 2:
     conn.commit()
 c.close()
 conn.close()
+
 
 # New better cli interface
 class SniperCLI(object):
@@ -45,7 +44,7 @@ List of sniper commands:
             print('Unrecognized command')
             parser.print_help()
             exit(1)
-        
+
         # use dispatch pattern to invoke method with same name
         getattr(self, args.command)()
 
@@ -55,14 +54,14 @@ List of sniper commands:
         c.execute('SELECT pid FROM process')
         pid_row = c.fetchone()
 
-        if pid_row != None and psutil.pid_exists(pid_row['pid']):
+        if pid_row is not None and psutil.pid_exists(pid_row['pid']):
             print('Sniper process is already running')
             return
         else:
             c.execute('DELETE FROM process')
             conn.commit()
 
-            proc = subprocess.Popen(['python', 'deamon.py'], start_new_session=True)
+            proc = subprocess.Popen(['python', 'daemon.py'], start_new_session=True)
             pid = proc.pid
 
             c.execute('INSERT INTO process(pid) VALUES(?)', (pid,))
@@ -78,12 +77,12 @@ List of sniper commands:
 
         c.execute('SELECT * FROM process')
         pid_row = c.fetchone()
-        if pid_row != None and psutil.pid_exists(pid_row['pid']):
+        if pid_row is not None and psutil.pid_exists(pid_row['pid']):
             psutil.Process(pid_row['pid']).kill()
             print('Sniper process successfully terminated')
         else:
             print('Sniper process is not currently running')
-        
+
         c.execute('DELETE FROM process')
         conn.commit()
 
@@ -104,7 +103,7 @@ List of sniper commands:
             print('Sniper process is running')
         else:
             print('Sniper process is *not* running')
-        
+
         c.close()
         conn.close()
 
@@ -118,14 +117,14 @@ List of sniper commands:
         item_data = utils.retreive_listing_information(args.item)
 
         conn, c = utils.get_conn()
-        c.execute('INSERT INTO listings(item_id, max_bid, name, ending_dt) VALUES(?,?,?,?)', (args.item, args.max, item_data['name'], item_data['ending_dt']))
+        c.execute('INSERT INTO listings(item_id, max_bid, name, ending_dt) VALUES(?,?,?,?)',
+                  (args.item, args.max, item_data['name'], item_data['ending_dt']))
         conn.commit()
 
         print('Successfully added snipe for item #' + str(args.item))
 
         c.close()
         conn.close()
-
 
     def delete(self):
         parser = argparse.ArgumentParser(description='Delete an item from sniping list')
@@ -170,8 +169,10 @@ List of sniper commands:
         listings = c.fetchall()
         for listing in listings:
             ending_dt = parse(listing['ending_dt'])
-            print(str(listing['item_id']) + ' | ' + str(ending_dt) + ' | ' + str(listing['name']) + ' | Max Bid: ' + str(listing['max_bid']) + ' | URL: ' + 'https://www.shopgoodwill.com/Item/' + str(listing['item_id']))
-        
+            print(
+                str(listing['item_id']) + ' | ' + str(ending_dt) + ' | ' + str(listing['name']) + ' | Max Bid: ' + str(
+                    listing['max_bid']) + ' | URL: ' + 'https://www.shopgoodwill.com/Item/' + str(listing['item_id']))
+
         c.close()
         conn.close()
 
@@ -182,5 +183,6 @@ List of sniper commands:
 
     def dump(self):
         utils.send_msg('dump')
+
 
 SniperCLI()

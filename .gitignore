@@ -2,3 +2,5 @@ config.json
 sniper.db
 __pycache__/**
 geckodriver.log
+cookie_grabber.py
+.idea/**
