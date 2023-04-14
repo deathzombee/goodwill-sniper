@@ -20,11 +20,155 @@ conn.close()
 
 
 # New better cli interface
-class SniperCLI(object):
-    def __init__(self):
-        parser = argparse.ArgumentParser(
-            description='Command Line Sniper for the Goodwill Shopping Website',
-            usage='''sniper.py <command> [<args>]
+def start():
+    dconn, cmd = utils.get_conn()
+
+    cmd.execute('SELECT pid FROM process')
+    pid_row = cmd.fetchone()
+
+    if pid_row is not None and psutil.pid_exists(pid_row['pid']):
+        print('Sniper process is already running')
+        return
+    else:
+        cmd.execute('DELETE FROM process')
+        dconn.commit()
+
+        proc = subprocess.Popen(['python', 'daemon.py'], start_new_session=True)
+        pid = proc.pid
+
+        cmd.execute('INSERT INTO process(pid) VALUES(?)', (pid,))
+        dconn.commit()
+
+        print('Sniper process succcessfully started with PID ' + str(pid))
+
+    cmd.close()
+    dconn.close()
+
+
+def stop():
+    dconn, cmd = utils.get_conn()
+
+    cmd.execute('SELECT * FROM process')
+    pid_row = cmd.fetchone()
+    if pid_row is not None and psutil.pid_exists(pid_row['pid']):
+        psutil.Process(pid_row['pid']).kill()
+        print('Sniper process successfully terminated')
+    else:
+        print('Sniper process is not currently running')
+
+    cmd.execute('DELETE FROM process')
+    dconn.commit()
+
+    cmd.close()
+    dconn.close()
+
+
+def restart():
+    stop()
+    start()
+
+
+def status():
+    dconn, cmd = utils.get_conn()
+
+    cmd.execute('SELECT pid FROM process')
+    pid_row = cmd.fetchone()
+
+    if pid_row is not None and psutil.pid_exists(pid_row['pid']):
+        print('Sniper process is running')
+    else:
+        print('Sniper process is *not* running')
+
+    cmd.close()
+    dconn.close()
+
+
+def create():
+    parser = argparse.ArgumentParser(description='Create new item to snipe')
+    required = parser.add_argument_group('required named arguments')
+    required.add_argument('-i', '--item', action='store', type=int, required=True)
+    required.add_argument('-m', '--max', action='store', type=int, required=True)
+    args = parser.parse_args(sys.argv[2:])
+
+    item_data = utils.retreive_listing_information(args.item)
+
+    dconn, cmd = utils.get_conn()
+    cmd.execute('INSERT INTO listings(item_id, max_bid, name, ending_dt) VALUES(?,?,?,?)',
+                (args.item, args.max, item_data['name'], item_data['ending_dt']))
+    dconn.commit()
+
+    print('Successfully added snipe for item #' + str(args.item))
+
+    cmd.close()
+    dconn.close()
+
+
+def delete():
+    parser = argparse.ArgumentParser(description='Delete an item from sniping list')
+    required = parser.add_argument_group('required named arguments')
+    required.add_argument('-i', '--item', nargs='+', action='store', type=int, required=True)
+    args = parser.parse_args(sys.argv[2:])
+
+    dconn, cmd = utils.get_conn()
+    for item in args.item:
+        cmd.execute('DELETE FROM listings WHERE item_id=?', (item,))
+    dconn.commit()
+    cmd.close()
+    dconn.close()
+
+    try:
+        utils.send_msg('update')
+    except ConnectionRefusedError:
+        pass
+
+
+def update():
+    parser = argparse.ArgumentParser(description='Delete an item from sniping list')
+    required = parser.add_argument_group('required named arguments')
+    required.add_argument('-i', '--item', action='store', type=int, required=True)
+    required.add_argument('-m', '--max', action='store', type=int, required=True)
+    args = parser.parse_args(sys.argv[2:])
+
+    dconn, cmd = utils.get_conn()
+    cmd.execute('UPDATE listings SET max_bid=? WHERE item_id=?', (args.max, args.item))
+    dconn.commit()
+    cmd.close()
+    dconn.close()
+
+    try:
+        utils.send_msg('update')
+    except ConnectionRefusedError:
+        pass
+
+
+def item_list():
+    dconn, cmd = utils.get_conn()
+
+    cmd.execute('SELECT * FROM listings ORDER BY ending_dt')
+    listings = cmd.fetchall()
+    for listing in listings:
+        ending_dt = parse(listing['ending_dt'])
+        print(
+            str(listing['item_id']) + ' | ' + str(ending_dt) + ' | ' + str(listing['name']) + ' | Max Bid: ' + str(
+                listing['max_bid']) + ' | URL: ' + 'https://www.shopgoodwill.com/Item/' + str(listing['item_id']))
+
+    cmd.close()
+    dconn.close()
+
+    try:
+        utils.send_msg('update')
+    except ConnectionRefusedError:
+        pass
+
+
+def dump():
+    utils.send_msg('dump')
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description='Command Line Sniper for the Goodwill Shopping Website',
+        usage='''sniper.py <command> [<args>]
 
 List of sniper commands:
     start   Initializes the sniping background process
@@ -36,153 +180,28 @@ List of sniper commands:
     update  Used to update the max bid for a specified item
     list    Prints the list of items scheduled to be sniped
 '''
-        )
-        parser.add_argument('command', help='name of command to be executed')
+    )
+    parser.add_argument('command', help='name of command to be executed')
 
-        args = parser.parse_args(sys.argv[1:2])
-        if not hasattr(self, args.command):
-            print('Unrecognized command')
-            parser.print_help()
-            exit(1)
-
-        # use dispatch pattern to invoke method with same name
-        getattr(self, args.command)()
-
-    def start(self):
-        conn, c = utils.get_conn()
-
-        c.execute('SELECT pid FROM process')
-        pid_row = c.fetchone()
-
-        if pid_row is not None and psutil.pid_exists(pid_row['pid']):
-            print('Sniper process is already running')
-            return
-        else:
-            c.execute('DELETE FROM process')
-            conn.commit()
-
-            proc = subprocess.Popen(['python', 'daemon.py'], start_new_session=True)
-            pid = proc.pid
-
-            c.execute('INSERT INTO process(pid) VALUES(?)', (pid,))
-            conn.commit()
-
-            print('Sniper process succcessfully started with PID ' + str(pid))
-
-        c.close()
-        conn.close()
-
-    def stop(self):
-        conn, c = utils.get_conn()
-
-        c.execute('SELECT * FROM process')
-        pid_row = c.fetchone()
-        if pid_row is not None and psutil.pid_exists(pid_row['pid']):
-            psutil.Process(pid_row['pid']).kill()
-            print('Sniper process successfully terminated')
-        else:
-            print('Sniper process is not currently running')
-
-        c.execute('DELETE FROM process')
-        conn.commit()
-
-        c.close()
-        conn.close()
-
-    def restart(self):
-        self.stop()
-        self.start()
-
-    def status(self):
-        conn, c = utils.get_conn()
-
-        c.execute('SELECT pid FROM process')
-        pid_row = c.fetchone()
-
-        if pid_row != None and psutil.pid_exists(pid_row['pid']):
-            print('Sniper process is running')
-        else:
-            print('Sniper process is *not* running')
-
-        c.close()
-        conn.close()
-
-    def create(self):
-        parser = argparse.ArgumentParser(description='Create new item to snipe')
-        required = parser.add_argument_group('required named arguments')
-        required.add_argument('-i', '--item', action='store', type=int, required=True)
-        required.add_argument('-m', '--max', action='store', type=int, required=True)
-        args = parser.parse_args(sys.argv[2:])
-
-        item_data = utils.retreive_listing_information(args.item)
-
-        conn, c = utils.get_conn()
-        c.execute('INSERT INTO listings(item_id, max_bid, name, ending_dt) VALUES(?,?,?,?)',
-                  (args.item, args.max, item_data['name'], item_data['ending_dt']))
-        conn.commit()
-
-        print('Successfully added snipe for item #' + str(args.item))
-
-        c.close()
-        conn.close()
-
-    def delete(self):
-        parser = argparse.ArgumentParser(description='Delete an item from sniping list')
-        required = parser.add_argument_group('required named arguments')
-        required.add_argument('-i', '--item', nargs='+', action='store', type=int, required=True)
-        args = parser.parse_args(sys.argv[2:])
-
-        conn, c = utils.get_conn()
-        for item in args.item:
-            c.execute('DELETE FROM listings WHERE item_id=?', (item,))
-        conn.commit()
-        c.close()
-        conn.close()
-
-        try:
-            utils.send_msg('update')
-        except ConnectionRefusedError:
-            pass
-
-    def update(self):
-        parser = argparse.ArgumentParser(description='Delete an item from sniping list')
-        required = parser.add_argument_group('required named arguments')
-        required.add_argument('-i', '--item', action='store', type=int, required=True)
-        required.add_argument('-m', '--max', action='store', type=int, required=True)
-        args = parser.parse_args(sys.argv[2:])
-
-        conn, c = utils.get_conn()
-        c.execute('UPDATE listings SET max_bid=? WHERE item_id=?', (args.max, args.item))
-        conn.commit()
-        c.close()
-        conn.close()
-
-        try:
-            utils.send_msg('update')
-        except ConnectionRefusedError:
-            pass
-
-    def list(self):
-        conn, c = utils.get_conn()
-
-        c.execute('SELECT * FROM listings ORDER BY ending_dt')
-        listings = c.fetchall()
-        for listing in listings:
-            ending_dt = parse(listing['ending_dt'])
-            print(
-                str(listing['item_id']) + ' | ' + str(ending_dt) + ' | ' + str(listing['name']) + ' | Max Bid: ' + str(
-                    listing['max_bid']) + ' | URL: ' + 'https://www.shopgoodwill.com/Item/' + str(listing['item_id']))
-
-        c.close()
-        conn.close()
-
-        try:
-            utils.send_msg('update')
-        except ConnectionRefusedError:
-            pass
-
-    def dump(self):
-        utils.send_msg('dump')
+    args = parser.parse_args(sys.argv[1:2])
+    command_mapping = {
+        'start': start,
+        'stop': stop,
+        'restart': restart,
+        'status': status,
+        'create': create,
+        'delete': delete,
+        'update': update,
+        'list': item_list,
+        'dump': dump,
+    }
+    command = command_mapping.get(args.command)
+    if command is None:
+        print('Unrecognized command')
+        parser.print_help()
+        exit(1)
+    command()
 
 
-SniperCLI()
+if __name__ == '__main__':
+    main()
